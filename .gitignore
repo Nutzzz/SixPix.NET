@@ -1,3 +1,6 @@
 bin/
 obj/
 test/TestResults/
+/.vs
+example/example.csproj.user
+*.user
