@@ -1,7 +1,13 @@
+#if IMAGESHARP4
+using Ico.Reader;
+using Ico.Reader.Data;
+#endif
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Icon;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixPix;
+using System.Collections.ObjectModel;
 using System.Text;
 
 #if SIXPIX_DEBUG
@@ -15,8 +21,8 @@ if (args.Length == 0)
 }
 
 Transparency transp = Transparency.Default;
-int w = -1, h = -1, f = -1, rate = 0;
-bool getData = false, anim = false, animForever = false;
+int w = -1, h = -1, f = 0, rate = 10, cursor = 0, icon = 0, group = -1;
+bool getData = false, anim = false, animForever = false, getIcons = false, allIcons = false, getCursors = false, allCursors = false;
 string infile = "", outfile = "";
 const string MAP8_SIXEL = "Pq\"1;1;93;14#0;2;60;0;0#1;2;0;66;0#2;2;56;60;0#3;2;47;38;97#4;2;72;0;69#5;2;0;66;72#6;2;72;72;72#7;2;0;0;0#0!11~#1!12~#2!12~#3!12~#4!12~#5!12~#6!12~#7!10~-#0!11~#1!12~#2!12~#3!12~#4!12~#5!12~#6!12~#7!10~-#0!11B#1!12B#2!12B#3!12B#4!12B#5!12B#6!12B#7!10B\\";
 
@@ -34,6 +40,39 @@ foreach (var arg in args)
             case 'A':
                 anim = true;
                 animForever = true;
+                break;
+            case 'g':
+            case 'G':
+                if (param.Contains('='))
+                    if (!int.TryParse(param[(param.IndexOf('=') + 1)..], out group))
+                        group = -1;
+                else if (param.Contains(':'))
+                    if (!int.TryParse(param[(param.IndexOf(':') + 1)..], out group))
+                        group = -1;
+                break;
+            case 'c':
+            case 'C':
+                getCursors = true;
+                if (param.Contains('='))
+                    if (!int.TryParse(param[(param.IndexOf('=') + 1)..], out cursor))
+                        cursor = 0;
+                else if (param.Contains(':'))
+                    if (!int.TryParse(param[(param.IndexOf(':') + 1)..], out cursor))
+                        cursor = 0;
+                else
+                    allCursors = true;
+                break;
+            case 'n':
+            case 'N':
+                getIcons = true;
+                if (param.Contains('='))
+                    if (!int.TryParse(param[(param.IndexOf('=') + 1)..], out icon))
+                        icon = 0;
+                else if (param.Contains(':'))
+                    if (!int.TryParse(param[(param.IndexOf(':') + 1)..], out icon))
+                        icon = 0;
+                else
+                    allIcons = true;
                 break;
             case 'd':
             case 'D':
@@ -126,10 +165,55 @@ if (!Path.Exists(infile))
 var fileInfo = new FileInfo(infile);
 if (IsBinary(infile))
 {
+    int x = 0, y = 0;
     var start = DateTime.Now;
 
     try
     {
+#if IMAGESHARP4
+        var ext = Path.GetExtension(infile).ToLower();
+        if (ext == ".exe" || ext == ".dll" || ext == ".icl")
+        {
+            var IcoReader = new IcoReader();
+            var icoData = IcoReader.Read(infile);
+
+            if (icoData == null)
+            {
+                Console.Error.WriteLine("Error: " + infile + " contains no icon or cursor data.");
+                Environment.Exit(1);
+                return;
+            }
+
+            if (!getIcons && !getCursors)
+            {
+                Console.Error.WriteLine("Icon/cursor data found. Specify /n:<index> or /c:<index> e.g., /n:17 or /c:1)");
+                Console.Error.WriteLine("to extract icons or cursors.");
+                Environment.Exit(1);
+                return;
+            }
+
+            if (group > -1)
+            {
+                var icoGroup = icoData.Groups[group];
+                ShowIco(icoData, icoGroup, icon, allIcons || allCursors, rate);
+            }
+            else if (getIcons)
+            {
+                foreach (IIcoGroup icoGroup in icoData.IconGroups)
+                {
+                    ShowIco(icoData, icoGroup, icon, allIcons, rate);
+                }
+            }
+            else if (getCursors)
+            {
+                foreach (IIcoGroup icoGroup in icoData.CursorGroups)
+                {
+                    ShowIco(icoData, icoGroup, cursor, allCursors, rate);
+                }
+            }
+            Environment.Exit(0);
+        }
+#endif
         using var fs = fileInfo.OpenRead();
         using var image = Image.Load<Rgba32>(fs);
         using var sixelEncoder = Sixel.CreateEncoder(image)
@@ -142,6 +226,7 @@ if (IsBinary(infile))
             getData = true;
         }
 #if IMAGESHARP4
+        //fs.Seek(0, 0);
         var best = Sixel.GetBestFrame(sixelEncoder.Image, null);
         if (f < 0)
             f = best;
@@ -201,7 +286,21 @@ if (IsBinary(infile))
                 }
             }
             Environment.Exit(0);
+
+        /*
+        if (numRepeats < 1)
+                numRepeats = 1;
+        if (anim)
+        {
+            Console.Clear();
+            (x, y) = Console.GetCursorPosition();
+            if (animForever)
+            {
+                Console.WriteLine("Press Ctrl+C to stop.");
+                y++;
+            }
         }
+        */
 
         if (f >= 0)
         {
@@ -292,6 +391,44 @@ else
 }
 Environment.Exit(0);
 
+static void ShowIco(IcoData data, IIcoGroup group, int index = 0, bool all = false, int rate = 10)
+{
+    var icos = new List<ImageReference>();
+    {
+        for (int i = 0; i < group.Size; i++)
+        {
+            icos.Add(i, data.GetImageReferences(group));
+            var refs = icos[i];
+            var t = refs[0];
+            t.GetImageData()
+            var iconImage = Image.Load(data.GetImage(group, i));
+            var iconBest = Sixel.GetBestFrame((Image<Rgba32>)iconImage);
+            
+        }
+    }
+    int x = 0, y = 0;
+    if (all)
+    {
+        Console.Clear();
+        (x, y) = Console.GetCursorPosition();
+        for (int i = 0; i < group.Size; i++)
+        {
+            Console.SetCursorPosition(x, y);
+            var iconImage = Image.Load(data.GetImage(group, i));
+            var iconBest = Sixel.GetBestFrame((Image<Rgba32>)iconImage);
+            Console.WriteLine(Sixel.Encode((Image<Rgba32>)iconImage, frame: iconBest).ToArray());
+            Thread.Sleep(rate * 10);
+        }
+    }
+    else
+    {
+        File.WriteAllBytes("test1.bin", data.GetImage(group, index));
+        var icoImage = Image.Load(data.GetImage(group, index));
+        var icoBest = Sixel.GetBestFrame((Image<Rgba32>)icoImage);
+        Console.WriteLine(Sixel.Encode((Image<Rgba32>)icoImage, frame: icoBest).ToArray());
+    }
+}
+
 static bool IsBinary(string filePath)
 {
     int numNul = 0;
@@ -348,6 +485,9 @@ static void PrintUsage()
     Console.WriteLine(" /r:<Rate>   : Animation framerate (in frames per millisecond)");
     Console.WriteLine("               0 or not specified means use the image's framerate");
 #if IMAGESHARP4 // ImageSharp v4.0 adds support for CUR and ICO files
+    Console.WriteLine(" /g:<Group>  : Get ico/cur from specific group of an EXE/DLL/ICL file (optional)");
+    Console.WriteLine(" /n:[<Index>]: Get all, or specific icon, from an EXE/DLL/ICL file (optional)");
+    Console.WriteLine(" /c:[<Index>]: Get all, or specific cursor, from an EXE/DLL/ICL file (optional)");
     Console.WriteLine(" <in>        : Image filename to encode to Sixel (required), supports BMP, CUR,");
     Console.WriteLine("               GIF, ICO, JPEG, PBM, PNG, QOI, TGA, TIFF, and WebP");
 #else
